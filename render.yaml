@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: monday-briefing
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    autoDeploy: true
+    disk:
+      name: briefing-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: BRIEFING_PUBLIC
+        value: "1"
+      - key: BRIEFING_SCHEDULE
+        value: "1"
+      - key: BRIEFING_TZ
+        value: America/Los_Angeles
+      - key: BRIEFING_MODEL
+        value: claude-sonnet-5-5
+      - key: DATABASE_PATH
+        value: /data/monday-briefing.sqlite3
+      - key: SECRET_KEY
+        generateValue: true
+      - key: BRIEFING_PASSWORD
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
