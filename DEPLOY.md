@@ -1,6 +1,6 @@
 # Deploy on Render
 
-The included Blueprint creates a Docker web service and a 1 GB persistent disk mounted at `/data`.
+The included Blueprint creates a free Docker web service. Its SQLite database uses ephemeral storage, so learner progress and archives can reset after a redeploy or infrastructure restart.
 
 1. Push this repository to a private GitHub or GitLab repository.
 2. In Render, choose **New + → Blueprint**.
@@ -20,7 +20,6 @@ Exact production environment variables:
 - `BRIEFING_SCHEDULE=1`
 - `BRIEFING_TZ=America/Los_Angeles` (change if desired)
 - `BRIEFING_MODEL=claude-sonnet-5-5`
-- `DATABASE_PATH=/data/monday-briefing.sqlite3`
+- `DATABASE_PATH=/tmp/monday-briefing.sqlite3`
 
 Render runs one Gunicorn worker with eight threads. The in-app scheduler checks every 15 minutes. At or after 07:00 each Monday in `BRIEFING_TZ`, it starts the missing prior-week edition once and does not automatically retry a failed build.
-
