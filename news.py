@@ -84,6 +84,11 @@ MARKET_SERIES = {
 }
 
 REDDIT_FEED_URL = "https://www.reddit.com/r/investing+wallstreetbets+stocks+SecurityAnalysis/new/.rss?limit=50"
+REDDIT_INDEX_URL = (
+    "https://news.google.com/rss/search?q=%28site%3Areddit.com%2Fr%2Finvesting%20OR%20"
+    "site%3Areddit.com%2Fr%2Fwallstreetbets%20OR%20site%3Areddit.com%2Fr%2Fstocks%20OR%20"
+    "site%3Areddit.com%2Fr%2FSecurityAnalysis%29%20when%3A3d&hl=en-US&gl=US&ceid=US%3Aen"
+)
 REDDIT_COMMUNITIES = {
     "investing": "r/investing",
     "wallstreetbets": "r/wallstreetbets",
@@ -269,32 +274,48 @@ def fetch_market_snapshot(timeout=15):
     return result
 
 
-def fetch_reddit_sentiment(timeout=12, data=None, now=None):
+def fetch_reddit_sentiment(timeout=12, data=None, now=None, indexed=False):
     """Summarize titles from one low-frequency, public Reddit RSS request."""
     now = now or datetime.now(timezone.utc)
     if data is None:
-        request = urllib.request.Request(REDDIT_FEED_URL, headers={
+        headers = {
             "User-Agent": "MondayBriefing/3.0 by u/sharmashubham1-design",
             "Accept": "application/atom+xml, application/rss+xml, text/xml;q=0.9",
-        })
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = response.read(1_000_001)
+        }
+        try:
+            request = urllib.request.Request(REDDIT_FEED_URL, headers=headers)
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                data = response.read(1_000_001)
+        except Exception:
+            indexed = True
+            request = urllib.request.Request(REDDIT_INDEX_URL, headers=headers)
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                data = response.read(1_000_001)
         if len(data) > 1_000_000:
-            raise ValueError("Reddit feed exceeded 1 MB safety limit")
-    rows = parse_feed(data, FeedSource("Reddit communities", REDDIT_FEED_URL, kind="sentiment"), now)
+            raise ValueError("Reddit discussion feed exceeded 1 MB safety limit")
+    source_url = REDDIT_INDEX_URL if indexed else REDDIT_FEED_URL
+    rows = parse_feed(data, FeedSource("Reddit discussion index", source_url, kind="sentiment"), now)
     posts = []
     cutoff = now - timedelta(days=3)
     excluded = ("daily discussion", "weekly discussion", "what are your moves", "rate my portfolio", "beginner questions")
     for row in rows:
-        match = re.search(r"/r/([^/]+)/", row["url"], flags=re.I)
-        community_key = match.group(1).lower() if match else ""
-        if community_key not in REDDIT_COMMUNITIES or row["published"] < cutoff:
+        title = re.sub(r"\s+- Reddit$", "", row["title"], flags=re.I).strip()
+        if indexed:
+            match = re.search(r"r/(investing|wallstreetbets|stocks|SecurityAnalysis)\b", title, flags=re.I)
+            community_key = match.group(1).lower() if match else ""
+            community = REDDIT_COMMUNITIES.get(community_key, "Reddit (indexed)")
+        else:
+            match = re.search(r"/r/([^/]+)/", row["url"], flags=re.I)
+            community_key = match.group(1).lower() if match else ""
+            if community_key not in REDDIT_COMMUNITIES:
+                continue
+            community = REDDIT_COMMUNITIES[community_key]
+        if row["published"] < cutoff:
             continue
-        if any(phrase in row["title"].lower() for phrase in excluded):
+        if any(phrase in title.lower() for phrase in excluded):
             continue
         posts.append({
-            "title": row["title"], "url": row["url"],
-            "community": REDDIT_COMMUNITIES[community_key],
+            "title": title, "url": row["url"], "community": community,
             "published_at": row["published"].isoformat(),
         })
     posts = posts[:30]
@@ -340,9 +361,14 @@ def fetch_reddit_sentiment(timeout=12, data=None, now=None):
     return {
         "status": "available", "label": label, "score": score,
         "as_of": now.isoformat(), "post_count": len(posts),
-        "confidence": "low" if len(posts) < 12 else "medium",
+        "confidence": "low" if indexed or len(posts) < 12 else "medium",
         "themes": theme_rows[:3], "communities": community_counts,
-        "method": "Title-only lexical pulse from one public Reddit RSS request. No comments, user profiles or private data are collected.",
+        "method": (
+            "Title-only lexical pulse from a public news RSS index constrained to the selected Reddit communities. "
+            "Used only when Reddit blocks the direct feed; no comments, user profiles or private data are collected."
+            if indexed else
+            "Title-only lexical pulse from one public Reddit RSS request. No comments, user profiles or private data are collected."
+        ),
         "caveat": "Reddit communities are self-selected and can be promotional, ironic or coordinated. This measures attention and tone—not investor positioning or expected returns.",
         "cached": False,
     }

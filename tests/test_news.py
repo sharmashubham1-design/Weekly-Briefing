@@ -29,6 +29,21 @@ def reddit_atom():
     return f"<?xml version='1.0'?><feed xmlns='http://www.w3.org/2005/Atom'>{body}</feed>".encode()
 
 
+def indexed_reddit_rss():
+    items = [
+        "AI chip earnings beat expectations - Reddit",
+        "Are rate cuts back after the jobs report? - Reddit",
+        "Apple revenue and valuation discussion - Reddit",
+        "Oil prices may drive the market downturn - Reddit",
+    ]
+    body = "".join(
+        f"<item><title>{title}</title><link>https://news.google.com/rss/articles/{i}</link>"
+        f"<pubDate>Mon, 02 Nov 2026 16:00:0{i} GMT</pubDate></item>"
+        for i, title in enumerate(items)
+    )
+    return f"<?xml version='1.0'?><rss><channel>{body}</channel></rss>".encode()
+
+
 def test_parses_rss_and_preserves_source():
     source = FeedSource("Example", "https://example.test/feed", "Real estate & mortgages", True)
     rows = parse_feed(rss(), source, NOW)
@@ -115,3 +130,13 @@ def test_does_not_cache_an_unavailable_sentiment_result():
     )
     assert calls == [True]
     assert digest["sentiment"]["status"] == "available"
+
+
+def test_builds_low_confidence_pulse_from_public_index_fallback():
+    pulse = fetch_reddit_sentiment(data=indexed_reddit_rss(), now=NOW, indexed=True)
+    assert pulse["status"] == "available"
+    assert pulse["confidence"] == "low"
+    assert pulse["post_count"] == 4
+    assert all(not post["title"].endswith("- Reddit")
+               for theme in pulse["themes"] for post in theme["posts"])
+    assert "public news RSS index" in pulse["method"]
