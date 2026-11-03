@@ -83,7 +83,7 @@ MARKET_SERIES = {
     "DCOILWTICO": ("WTI crude", "price"),
 }
 
-REDDIT_FEED_URL = "https://www.reddit.com/r/investing+wallstreetbets+stocks+SecurityAnalysis/.rss"
+REDDIT_FEED_URL = "https://www.reddit.com/r/investing+wallstreetbets+stocks+SecurityAnalysis/new/.rss?limit=50"
 REDDIT_COMMUNITIES = {
     "investing": "r/investing",
     "wallstreetbets": "r/wallstreetbets",
@@ -467,8 +467,13 @@ def build_digest(now=None, previous=None, learner=None, fetcher=fetch_feed, tz_n
         failures.append({"source": "FRED market snapshot", "error": str(exc)[:120]})
 
     previous_sentiment = (previous or {}).get("sentiment") if isinstance((previous or {}).get("sentiment"), dict) else None
+    reusable_sentiment = bool(
+        previous_sentiment
+        and previous_sentiment.get("status") in ("available", "stale")
+        and previous_sentiment.get("themes")
+    )
     sentiment = None
-    if previous_sentiment and previous_sentiment.get("as_of"):
+    if reusable_sentiment and previous_sentiment.get("as_of"):
         try:
             sentiment_age = now - datetime.fromisoformat(previous_sentiment["as_of"]).astimezone(timezone.utc)
             if sentiment_age < timedelta(hours=6):
@@ -483,7 +488,7 @@ def build_digest(now=None, previous=None, learner=None, fetcher=fetch_feed, tz_n
             sentiment = sentiment_fetcher()
         except Exception as exc:
             failures.append({"source": "Reddit sentiment", "error": str(exc)[:120]})
-            if previous_sentiment:
+            if reusable_sentiment:
                 sentiment = dict(previous_sentiment)
                 sentiment["cached"] = True
                 sentiment["status"] = "stale"

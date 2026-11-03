@@ -94,3 +94,24 @@ def test_builds_caveated_reddit_sentiment_from_titles_only():
     assert any(row["name"] == "r/wallstreetbets" for row in pulse["communities"])
     assert "attention, not evidence" in pulse["themes"][0]["takeaway"]
     assert "No comments" in pulse["method"]
+
+
+def test_does_not_cache_an_unavailable_sentiment_result():
+    calls = []
+    previous = {
+        "items": [],
+        "sentiment": {
+            "status": "unavailable", "as_of": NOW.isoformat(), "themes": [],
+        },
+    }
+
+    def sentiment_fetcher():
+        calls.append(True)
+        return fetch_reddit_sentiment(data=reddit_atom(), now=NOW)
+
+    digest = build_digest(
+        now=NOW, previous=previous, fetcher=lambda _: rss(),
+        sentiment_fetcher=sentiment_fetcher,
+    )
+    assert calls == [True]
+    assert digest["sentiment"]["status"] == "available"
