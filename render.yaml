@@ -12,13 +12,11 @@ services:
         value: "1"
       - key: BRIEFING_TZ
         value: America/Los_Angeles
-      - key: BRIEFING_MODEL
-        value: claude-sonnet-5-5
+      - key: BRIEFING_REFRESH_MINUTES
+        value: "45"
       - key: DATABASE_PATH
         value: /tmp/monday-briefing.sqlite3
       - key: SECRET_KEY
         generateValue: true
       - key: BRIEFING_PASSWORD
-        sync: false
-      - key: ANTHROPIC_API_KEY
         sync: false

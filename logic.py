@@ -36,7 +36,8 @@ def clean_text(value, limit=2000):
 def sanitize_briefing(raw):
     raw = raw if isinstance(raw, dict) else {}
     out = {"headline": clean_text(raw.get("headline"), 240), "tldr": [], "movers": [],
-           "items": [], "trends": [], "concepts": [], "decision_lens": [], "quiz": []}
+           "items": [], "trends": [], "concepts": [], "decision_lens": [], "quiz": [],
+           "changes": [], "checklist": [], "daily_meta": {}, "manager_desk": {}}
     out["tldr"] = [clean_text(x, 300) for x in raw.get("tldr", []) if clean_text(x, 300)][:4]
     for i, x in enumerate(raw.get("movers", []) if isinstance(raw.get("movers"), list) else []):
         if not isinstance(x, dict) or not clean_text(x.get("name")): continue
@@ -49,7 +50,10 @@ def sanitize_briefing(raw):
         topic = x.get("topic") if x.get("topic") in TOPICS else "Markets & investing"
         out["items"].append({"id": f"story-{i}", "topic": topic, "title": clean_text(x.get("title"), 180),
             "summary": clean_text(x.get("summary")), "why_it_matters": clean_text(x.get("why_it_matters")),
-            "concept": clean_text(x.get("concept"), 500), "sources": http_sources(x.get("sources"))})
+            "concept": clean_text(x.get("concept"), 500), "sources": http_sources(x.get("sources")),
+            "published_at": clean_text(x.get("published_at"), 80), "source_name": clean_text(x.get("source_name"), 120),
+            "source_kind": clean_text(x.get("source_kind"), 30),
+            "is_new": bool(x.get("is_new"))})
     for i, x in enumerate(raw.get("trends", []) if isinstance(raw.get("trends"), list) else []):
         if isinstance(x, dict) and clean_text(x.get("trend")):
             out["trends"].append({"id": f"trend-{i}", "topic": "Markets & investing", "trend": clean_text(x.get("trend"), 180),
@@ -71,6 +75,60 @@ def sanitize_briefing(raw):
         out["quiz"].append({"id": f"q-{i}", "topic": x.get("topic") if x.get("topic") in TOPICS else "Markets & investing",
             "concept": clean_text(x.get("concept"), 100), "q": clean_text(x.get("q"), 500),
             "options": [clean_text(o, 300) for o in opts], "answer_index": ans, "explanation": clean_text(x.get("explanation"), 800)})
+    out["changes"] = [{"title": clean_text(x.get("title"), 180),
+                       "topic": x.get("topic") if x.get("topic") in TOPICS else "Markets & investing",
+                       "source": clean_text(x.get("source"), 120)}
+                      for x in raw.get("changes", []) if isinstance(x, dict) and clean_text(x.get("title"))][:8]
+    out["checklist"] = [clean_text(x, 360) for x in raw.get("checklist", []) if clean_text(x, 360)][:6]
+    desk = raw.get("manager_desk") if isinstance(raw.get("manager_desk"), dict) else {}
+    desk_sections = []
+    for section in desk.get("sections", []) if isinstance(desk.get("sections"), list) else []:
+        if not isinstance(section, dict) or not clean_text(section.get("title"), 100):
+            continue
+        desk_items = []
+        for item in section.get("items", []) if isinstance(section.get("items"), list) else []:
+            url = clean_text(item.get("url"), 1000) if isinstance(item, dict) else ""
+            if isinstance(item, dict) and urlparse(url).scheme in ("http", "https"):
+                desk_items.append({"title": clean_text(item.get("title"), 220), "source": clean_text(item.get("source"), 120),
+                                   "published_at": clean_text(item.get("published_at"), 80), "url": url})
+        desk_sections.append({"title": clean_text(section.get("title"), 100), "cadence": clean_text(section.get("cadence"), 100),
+                              "question": clean_text(section.get("question"), 360), "items": desk_items[:5]})
+    references = []
+    for ref in desk.get("reference_board", []) if isinstance(desk.get("reference_board"), list) else []:
+        url = clean_text(ref.get("url"), 1000) if isinstance(ref, dict) else ""
+        if isinstance(ref, dict) and urlparse(url).scheme in ("http", "https"):
+            references.append({"name": clean_text(ref.get("name"), 140), "cadence": clean_text(ref.get("cadence"), 140),
+                               "why": clean_text(ref.get("why"), 360), "lag": clean_text(ref.get("lag"), 140), "url": url})
+    out["manager_desk"] = {
+        "mandate": clean_text(desk.get("mandate"), 500), "sections": desk_sections[:5], "reference_board": references[:10],
+        "market_snapshot": [{"id": clean_text(x.get("id"), 30), "name": clean_text(x.get("name"), 100),
+                             "value": clean_text(x.get("value"), 50), "change": clean_text(x.get("change"), 100),
+                             "as_of": clean_text(x.get("as_of"), 20), "url": clean_text(x.get("url"), 1000)}
+                            for x in desk.get("market_snapshot", [])
+                            if isinstance(x, dict) and urlparse(clean_text(x.get("url"), 1000)).scheme in ("http", "https")][:10],
+        "daily_loop": [clean_text(x, 360) for x in desk.get("daily_loop", []) if clean_text(x, 360)][:5],
+        "blind_spots": [clean_text(x, 360) for x in desk.get("blind_spots", []) if clean_text(x, 360)][:6],
+    }
+    meta = raw.get("daily_meta") if isinstance(raw.get("daily_meta"), dict) else {}
+    out["daily_meta"] = {
+        "generated_at": clean_text(meta.get("generated_at"), 80),
+        "period_start": clean_text(meta.get("period_start"), 20),
+        "period_end": clean_text(meta.get("period_end"), 20),
+        "session": clean_text(meta.get("session"), 20),
+        "source_count": int(meta.get("source_count", 0) or 0),
+        "story_count": int(meta.get("story_count", 0) or 0),
+        "new_count": int(meta.get("new_count", 0) or 0),
+        "sources": [clean_text(x, 120) for x in meta.get("sources", []) if clean_text(x, 120)][:20],
+        "failed_sources": [{"source": clean_text(x.get("source"), 120), "error": clean_text(x.get("error"), 160)}
+                           for x in meta.get("failed_sources", []) if isinstance(x, dict)][:20],
+        "method": clean_text(meta.get("method"), 240),
+    }
+    # Preserve stable IDs generated from source URLs so feedback survives refreshes.
+    for section in ("movers", "items", "trends", "concepts", "decision_lens", "quiz"):
+        source_rows = raw.get(section, []) if isinstance(raw.get(section), list) else []
+        for index, row in enumerate(out[section]):
+            if index < len(source_rows) and isinstance(source_rows[index], dict) and clean_text(source_rows[index].get("id"), 80):
+                row["id"] = clean_text(source_rows[index]["id"], 80)
     return out
 
 

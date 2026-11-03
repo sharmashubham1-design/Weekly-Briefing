@@ -1,8 +1,23 @@
-# Monday Briefing
+# Daily Briefing
 
-A private, adaptive weekly learning app. Each Monday it researches the previous Monday–Sunday window and produces a sourced briefing, per-card tutor, six-question quiz, learner model, and archive.
+A private financial-intelligence and learning dashboard designed to be useful in the morning, at midday, and in the evening. It collects recent items from a fixed set of free public RSS/Atom feeds, preserves links to the original sources, classifies the stories, highlights what changed, and creates a practical decision checklist.
 
-The app teaches decision-relevant context. It does **not** recommend financial actions, trades, timing, allocations, or price targets.
+No API key or paid AI service is used. The app does **not** recommend buys, sells, timing, allocations, or price targets.
+
+## Daily workflow
+
+- Opening the app automatically refreshes an edition that is older than 45 minutes.
+- **Refresh sources** requests an update, with a five-minute safety cooldown.
+- Morning, midday, and evening editions use a rolling seven-day context window.
+- **What changed** distinguishes new source items from the prior edition.
+- **Your action checklist** suggests verification and planning steps, not trades.
+- **The manager's desk** adds delayed public cross-asset observations, macro/policy releases, SEC filing links, catalyst questions, a primary-source reference board, and an explicit list of blind spots.
+- Every story links to its original source and includes a concept, tutor, feedback controls, and quiz question.
+- Interest and mastery still adapt story ranking and the learning experience.
+
+The source set currently includes Federal Reserve/FRED, SEC, BLS, BEA, EIA, CFPB, BBC Business, NPR Business, BBC Technology, and Ars Technica. Broad editorial feeds must pass a finance/industry relevance filter. One failed feed does not prevent the other sources from producing an edition.
+
+The free desk is intentionally honest about latency. FRED observations are daily rather than live; CFTC positioning is periodic; Form 13F holdings can be filed up to 45 days after quarter-end; and SEC automated feeds may rate-limit or reject a refresh. The app links directly to the official calendars and searches when a feed is unavailable.
 
 ## Run locally
 
@@ -18,22 +33,19 @@ export DATABASE_PATH='./data/monday-briefing.sqlite3'
 flask --app app run --debug
 ```
 
-Without `ANTHROPIC_API_KEY`, the app starts in clearly labelled demo mode and uses timeless sample teaching content—not synthetic news. Set the key to enable live research.
-
 ## Configuration
 
 | Variable | Required in production | Purpose |
 |---|---:|---|
-| `ANTHROPIC_API_KEY` | Yes for Live mode | Anthropic API credential |
 | `BRIEFING_PASSWORD` | Yes | Single-user login; 10+ characters when public |
 | `SECRET_KEY` | Yes | Strong random Flask session signing key |
 | `BRIEFING_PUBLIC` | Yes | Set to `1` on a public host |
-| `BRIEFING_SCHEDULE` | Recommended | Set to `1` for Monday scheduling |
+| `BRIEFING_SCHEDULE` | Recommended | Set to `1` for in-process freshness checks while awake |
+| `BRIEFING_REFRESH_MINUTES` | No | Refresh threshold; defaults to `45`, minimum `15` |
 | `BRIEFING_TZ` | No | Defaults to `America/Los_Angeles` |
-| `BRIEFING_MODEL` | No | Defaults to `claude-sonnet-5-5` |
 | `DATABASE_PATH` | No | Defaults to `/data/monday-briefing.sqlite3` |
 
-When `BRIEFING_PUBLIC=1`, startup refuses weak passwords and a missing/default `SECRET_KEY`. Gunicorn must use exactly one worker because build status and the scheduler are in process; threads provide concurrent polling and page requests.
+On Render's free tier the service sleeps. Page-open refresh is therefore the reliable mechanism; the scheduler is an additional convenience while the service is awake.
 
 ## Tests
 
@@ -41,15 +53,14 @@ When `BRIEFING_PUBLIC=1`, startup refuses weak passwords and a missing/default `
 pytest -q
 ```
 
-The test suite does not need an API key. It covers login gating and lockout, production startup checks, week math, scoring and learner updates, malformed model-output sanitising, and the one-attempt rule.
+Tests use local sample feed XML, never the network. They cover authentication, security checks, week math, feed parsing and daily digest construction, validation, quiz scoring, learner updates, and one-attempt enforcement.
 
 ## Architecture
 
-- `agent.py`: the only Anthropic integration; streaming requests, server-side web search, and `pause_turn` continuation.
-- `logic.py`: date math, validation/sanitising, scoring, and learner-model updates.
+- `news.py`: fixed-source feed fetching, RSS/Atom parsing, ranking, classification, change detection, deterministic digest/quiz generation, and free tutor responses.
+- `logic.py`: validation/sanitising, scoring, and learner-model updates.
 - `db.py`: SQLite schema and data access.
-- `app.py`: Flask routes, authentication, build coordination, and scheduler.
+- `app.py`: Flask routes, authentication, refresh coordination, and scheduler.
 - `static/`: no-build vanilla JavaScript interface.
 
-Live weekly builds search for every factual claim, limit stored URLs to retrieved HTTP(S) sources, and validate the model’s JSON before saving. Quiz answers and explanations are removed from browser responses until submission.
-
+All factual story text comes from feed titles/descriptions and retains the original URL. Added interpretation is limited to clearly labelled educational context and decision questions.

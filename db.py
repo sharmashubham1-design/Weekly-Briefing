@@ -73,7 +73,9 @@ def set_setting(key, value):
 
 def save_briefing(week_start, week_end, mode, payload):
     db = get_db()
-    db.execute("INSERT OR REPLACE INTO briefings(week_start,week_end,mode,payload) VALUES (?,?,?,?)",
+    db.execute("""INSERT INTO briefings(week_start,week_end,mode,payload) VALUES (?,?,?,?)
+                  ON CONFLICT(week_start) DO UPDATE SET week_end=excluded.week_end,
+                  mode=excluded.mode,payload=excluded.payload,created_at=CURRENT_TIMESTAMP""",
                (week_start, week_end, mode, json.dumps(payload)))
     db.commit()
 
@@ -81,3 +83,6 @@ def save_briefing(week_start, week_end, mode, payload):
 def briefing_row(week_start):
     return get_db().execute("SELECT * FROM briefings WHERE week_start=?", (week_start,)).fetchone()
 
+
+def latest_briefing_row():
+    return get_db().execute("SELECT * FROM briefings ORDER BY created_at DESC, week_start DESC LIMIT 1").fetchone()
