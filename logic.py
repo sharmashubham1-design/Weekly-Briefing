@@ -37,7 +37,7 @@ def sanitize_briefing(raw):
     raw = raw if isinstance(raw, dict) else {}
     out = {"headline": clean_text(raw.get("headline"), 240), "tldr": [], "movers": [],
            "items": [], "trends": [], "concepts": [], "decision_lens": [], "quiz": [],
-           "changes": [], "checklist": [], "daily_meta": {}, "manager_desk": {}}
+           "changes": [], "checklist": [], "daily_meta": {}, "manager_desk": {}, "sentiment": {}}
     out["tldr"] = [clean_text(x, 300) for x in raw.get("tldr", []) if clean_text(x, 300)][:4]
     for i, x in enumerate(raw.get("movers", []) if isinstance(raw.get("movers"), list) else []):
         if not isinstance(x, dict) or not clean_text(x.get("name")): continue
@@ -53,6 +53,7 @@ def sanitize_briefing(raw):
             "concept": clean_text(x.get("concept"), 500), "sources": http_sources(x.get("sources")),
             "published_at": clean_text(x.get("published_at"), 80), "source_name": clean_text(x.get("source_name"), 120),
             "source_kind": clean_text(x.get("source_kind"), 30),
+            "watch_next": clean_text(x.get("watch_next"), 300),
             "is_new": bool(x.get("is_new"))})
     for i, x in enumerate(raw.get("trends", []) if isinstance(raw.get("trends"), list) else []):
         if isinstance(x, dict) and clean_text(x.get("trend")):
@@ -108,6 +109,36 @@ def sanitize_briefing(raw):
                             if isinstance(x, dict) and urlparse(clean_text(x.get("url"), 1000)).scheme in ("http", "https")][:10],
         "daily_loop": [clean_text(x, 360) for x in desk.get("daily_loop", []) if clean_text(x, 360)][:5],
         "blind_spots": [clean_text(x, 360) for x in desk.get("blind_spots", []) if clean_text(x, 360)][:6],
+    }
+    sentiment = raw.get("sentiment") if isinstance(raw.get("sentiment"), dict) else {}
+    sentiment_themes = []
+    for theme in sentiment.get("themes", []) if isinstance(sentiment.get("themes"), list) else []:
+        if not isinstance(theme, dict) or not clean_text(theme.get("theme"), 120):
+            continue
+        posts = []
+        for post in theme.get("posts", []) if isinstance(theme.get("posts"), list) else []:
+            url = clean_text(post.get("url"), 1000) if isinstance(post, dict) else ""
+            if isinstance(post, dict) and urlparse(url).scheme in ("http", "https"):
+                posts.append({"title": clean_text(post.get("title"), 220), "url": url,
+                              "community": clean_text(post.get("community"), 80),
+                              "published_at": clean_text(post.get("published_at"), 80)})
+        sentiment_themes.append({"theme": clean_text(theme.get("theme"), 120),
+                                 "mentions": max(0, int(theme.get("mentions", 0) or 0)),
+                                 "takeaway": clean_text(theme.get("takeaway"), 420), "posts": posts[:3]})
+    sentiment_communities = []
+    for community in sentiment.get("communities", []) if isinstance(sentiment.get("communities"), list) else []:
+        url = clean_text(community.get("url"), 1000) if isinstance(community, dict) else ""
+        if isinstance(community, dict) and urlparse(url).scheme in ("http", "https"):
+            sentiment_communities.append({"name": clean_text(community.get("name"), 80),
+                                          "posts": max(0, int(community.get("posts", 0) or 0)), "url": url})
+    out["sentiment"] = {
+        "status": clean_text(sentiment.get("status"), 30), "label": clean_text(sentiment.get("label"), 100),
+        "score": max(-100, min(100, int(sentiment.get("score", 0) or 0))),
+        "as_of": clean_text(sentiment.get("as_of"), 80),
+        "post_count": max(0, int(sentiment.get("post_count", 0) or 0)),
+        "confidence": clean_text(sentiment.get("confidence"), 30), "themes": sentiment_themes[:3],
+        "communities": sentiment_communities[:6], "method": clean_text(sentiment.get("method"), 420),
+        "caveat": clean_text(sentiment.get("caveat"), 500), "cached": bool(sentiment.get("cached")),
     }
     meta = raw.get("daily_meta") if isinstance(raw.get("daily_meta"), dict) else {}
     out["daily_meta"] = {

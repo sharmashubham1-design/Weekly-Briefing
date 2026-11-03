@@ -6,6 +6,8 @@ No API key or paid AI service is used. The app does **not** recommend buys, sell
 
 ## Daily workflow
 
+- The default screen is a **five-minute briefing**: three ranked developments, a compact market strip, three Reddit discussion themes, one concept, and three next steps.
+- Everything else is progressively disclosed under **Open the full research desk** so the product teaches before it expands.
 - Opening the app automatically refreshes an edition that is older than 45 minutes.
 - **Refresh sources** requests an update, with a five-minute safety cooldown.
 - Morning, midday, and evening editions use a rolling seven-day context window.
@@ -16,6 +18,8 @@ No API key or paid AI service is used. The app does **not** recommend buys, sell
 - Interest and mastery still adapt story ranking and the learning experience.
 
 The source set currently includes Federal Reserve/FRED, SEC, BLS, BEA, EIA, CFPB, BBC Business, NPR Business, BBC Technology, and Ars Technica. Broad editorial feeds must pass a finance/industry relevance filter. One failed feed does not prevent the other sources from producing an edition.
+
+The sentiment panel makes one low-frequency, public RSS request covering r/investing, r/wallstreetbets, r/stocks, and r/SecurityAnalysis. It stores only post titles, links, community names, and publication times. The pulse is a simple, disclosed lexical indicator; it is labelled as low/medium-confidence attention data and never treated as factual research or a forecast. A successful result is reused for six hours to respect public rate limits.
 
 The free desk is intentionally honest about latency. FRED observations are daily rather than live; CFTC positioning is periodic; Form 13F holdings can be filed up to 45 days after quarter-end; and SEC automated feeds may rate-limit or reject a refresh. The app links directly to the official calendars and searches when a feed is unavailable.
 

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from news import FeedSource, build_digest, parse_feed
+from news import FeedSource, build_digest, fetch_reddit_sentiment, parse_feed
 
 
 NOW = datetime(2026, 11, 2, 18, 0, tzinfo=timezone.utc)
@@ -11,6 +11,22 @@ def rss(title="Mortgage rates shift as housing affordability changes", link="htt
     <rss><channel><item><title>{title}</title><link>{link}</link>
     <description>Official data adds context for household costs and financial decisions.</description>
     <pubDate>Mon, 02 Nov 2026 16:00:00 GMT</pubDate></item></channel></rss>""".encode()
+
+
+def reddit_atom():
+    entries = [
+        ("NVDA earnings and AI chip demand look strong", "investing", "17:00:00"),
+        ("Are rate cuts back after the jobs report?", "stocks", "16:00:00"),
+        ("Buying calls before semiconductor earnings", "wallstreetbets", "15:00:00"),
+        ("Valuation and cash flow analysis for a large bank", "SecurityAnalysis", "14:00:00"),
+        ("Is the market overvalued and vulnerable to a crash?", "investing", "13:00:00"),
+    ]
+    body = "".join(
+        f"<entry><title>{title}</title><link href='https://www.reddit.com/r/{sub}/comments/example/post/'/>"
+        f"<updated>2026-11-02T{clock}Z</updated><content>Discussion</content></entry>"
+        for title, sub, clock in entries
+    )
+    return f"<?xml version='1.0'?><feed xmlns='http://www.w3.org/2005/Atom'>{body}</feed>".encode()
 
 
 def test_parses_rss_and_preserves_source():
@@ -68,3 +84,13 @@ def test_detects_changes_from_previous_edition():
     second = build_digest(now=NOW, previous=first, fetcher=fetcher)
     assert second["daily_meta"]["new_count"] == 0
     assert second["changes"] == []
+
+
+def test_builds_caveated_reddit_sentiment_from_titles_only():
+    pulse = fetch_reddit_sentiment(data=reddit_atom(), now=NOW)
+    assert pulse["status"] == "available"
+    assert pulse["post_count"] == 5
+    assert len(pulse["themes"]) == 3
+    assert any(row["name"] == "r/wallstreetbets" for row in pulse["communities"])
+    assert "attention, not evidence" in pulse["themes"][0]["takeaway"]
+    assert "No comments" in pulse["method"]

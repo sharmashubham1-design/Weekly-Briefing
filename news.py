@@ -83,6 +83,25 @@ MARKET_SERIES = {
     "DCOILWTICO": ("WTI crude", "price"),
 }
 
+REDDIT_FEED_URL = "https://www.reddit.com/r/investing+wallstreetbets+stocks+SecurityAnalysis/.rss"
+REDDIT_COMMUNITIES = {
+    "investing": "r/investing",
+    "wallstreetbets": "r/wallstreetbets",
+    "stocks": "r/stocks",
+    "securityanalysis": "r/SecurityAnalysis",
+}
+SENTIMENT_THEMES = {
+    "Rates & macro": ("fed", "rate", "inflation", "jobs", "recession", "treasury", "yield", "economy", "gdp"),
+    "AI & semiconductors": (" ai ", "artificial intelligence", "nvidia", "nvda", "chip", "semiconductor", "data center"),
+    "Mega-cap technology": ("apple", "aapl", "microsoft", "msft", "amazon", "amzn", "google", "googl", "meta", "tesla", "tsla"),
+    "Crypto & speculative risk": ("bitcoin", "btc", "crypto", "ethereum", "eth", "meme", "squeeze", "calls", "puts"),
+    "Earnings & valuation": ("earnings", "revenue", "guidance", "valuation", "overvalued", "undervalued", "p/e", "cash flow"),
+    "Energy & commodities": ("oil", "gas", "energy", "gold", "silver", "commodity", "uranium"),
+    "Banks & credit": ("bank", "credit", "loan", "default", "financial", "mortgage"),
+}
+SENTIMENT_POSITIVE = ("bull", "buy", "rally", "upside", "beat", "breakout", "long", "growth", "ath", "moon", "squeeze", "calls")
+SENTIMENT_NEGATIVE = ("bear", "sell", "crash", "downside", "miss", "bubble", "recession", "overvalued", "short", "dump", "puts")
+
 TOPIC_KEYWORDS = {
     "Markets & investing": (
         "stock", "shares", "market", "investor", "earnings", "revenue", "profit", "bond", "yield",
@@ -250,6 +269,85 @@ def fetch_market_snapshot(timeout=15):
     return result
 
 
+def fetch_reddit_sentiment(timeout=12, data=None, now=None):
+    """Summarize titles from one low-frequency, public Reddit RSS request."""
+    now = now or datetime.now(timezone.utc)
+    if data is None:
+        request = urllib.request.Request(REDDIT_FEED_URL, headers={
+            "User-Agent": "MondayBriefing/3.0 by u/sharmashubham1-design",
+            "Accept": "application/atom+xml, application/rss+xml, text/xml;q=0.9",
+        })
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = response.read(1_000_001)
+        if len(data) > 1_000_000:
+            raise ValueError("Reddit feed exceeded 1 MB safety limit")
+    rows = parse_feed(data, FeedSource("Reddit communities", REDDIT_FEED_URL, kind="sentiment"), now)
+    posts = []
+    cutoff = now - timedelta(days=3)
+    excluded = ("daily discussion", "weekly discussion", "what are your moves", "rate my portfolio", "beginner questions")
+    for row in rows:
+        match = re.search(r"/r/([^/]+)/", row["url"], flags=re.I)
+        community_key = match.group(1).lower() if match else ""
+        if community_key not in REDDIT_COMMUNITIES or row["published"] < cutoff:
+            continue
+        if any(phrase in row["title"].lower() for phrase in excluded):
+            continue
+        posts.append({
+            "title": row["title"], "url": row["url"],
+            "community": REDDIT_COMMUNITIES[community_key],
+            "published_at": row["published"].isoformat(),
+        })
+    posts = posts[:30]
+    if not posts:
+        raise RuntimeError("No recent Reddit discussion titles were available")
+
+    theme_rows = []
+    for label, words in SENTIMENT_THEMES.items():
+        matches = [post for post in posts if any(word in f" {post['title'].lower()} " for word in words)]
+        if matches:
+            communities = sorted({post["community"] for post in matches})
+            theme_rows.append({
+                "theme": label, "mentions": len(matches),
+                "takeaway": f"Discussion is clustering around {label.lower()} across {', '.join(communities)}. Treat this as attention, not evidence.",
+                "posts": matches[:2],
+            })
+    theme_rows.sort(key=lambda row: row["mentions"], reverse=True)
+    if len(theme_rows) < 3:
+        used = {post["url"] for theme in theme_rows for post in theme["posts"]}
+        for post in posts:
+            if post["url"] in used:
+                continue
+            theme_rows.append({
+                "theme": "Active single-name discussion", "mentions": 1,
+                "takeaway": "A specific company or trade is drawing attention, but one popular thread is not a market-wide signal.",
+                "posts": [post],
+            })
+            used.add(post["url"])
+            if len(theme_rows) == 3:
+                break
+
+    titles = " ".join(post["title"].lower() for post in posts)
+    positive = sum(titles.count(word) for word in SENTIMENT_POSITIVE)
+    negative = sum(titles.count(word) for word in SENTIMENT_NEGATIVE)
+    total = positive + negative
+    score = round(100 * (positive - negative) / total) if total else 0
+    label = "Risk-on chatter" if score >= 25 else "Cautious chatter" if score <= -25 else "Mixed chatter"
+    community_counts = []
+    for name in REDDIT_COMMUNITIES.values():
+        count = sum(post["community"] == name for post in posts)
+        if count:
+            community_counts.append({"name": name, "posts": count, "url": f"https://www.reddit.com/{name}/"})
+    return {
+        "status": "available", "label": label, "score": score,
+        "as_of": now.isoformat(), "post_count": len(posts),
+        "confidence": "low" if len(posts) < 12 else "medium",
+        "themes": theme_rows[:3], "communities": community_counts,
+        "method": "Title-only lexical pulse from one public Reddit RSS request. No comments, user profiles or private data are collected.",
+        "caveat": "Reddit communities are self-selected and can be promotional, ironic or coordinated. This measures attention and tone—not investor positioning or expected returns.",
+        "cached": False,
+    }
+
+
 def _topic(row):
     if row.get("fixed_topic") in TOPICS:
         return row["fixed_topic"]
@@ -302,6 +400,15 @@ def _why_it_matters(topic):
     }[topic]
 
 
+def _watch_next(source_kind):
+    return {
+        "macro": "Watch the next official release and whether rates react in the same direction.",
+        "policy": "Read the primary document and check the effective date and affected entities.",
+        "filing": "Open the filing and compare the new disclosure with the prior period.",
+        "tech": "Look for confirmation in revenue, margins, capex or a company filing.",
+    }.get(source_kind, "Look for a second primary source or company disclosure that confirms the claim.")
+
+
 def _rank(row, now, interests):
     age_hours = max(0, (now - row["published"]).total_seconds() / 3600)
     freshness = max(0, 7 - age_hours / 24)
@@ -309,6 +416,17 @@ def _rank(row, now, interests):
     topic_interest = 2 * interests.get(row["topic"], .5)
     detail = min(len(row.get("summary", "")) / 300, 1)
     return freshness + official + topic_interest + detail
+
+
+def _decision_rank(row, now, interests):
+    haystack = f" {row['title']} {row.get('summary', '')} ".lower()
+    decision_words = (
+        "earnings", "guidance", "revenue", "profit", "fed", "rate", "inflation", "jobs", "treasury",
+        "yield", "merger", "acquisition", "regulation", "sec ", "tax", "credit", "oil", "bitcoin",
+        "semiconductor", "tariff", "gdp", "consumer spending",
+    )
+    primary_bonus = 4 if row.get("source_kind") in ("macro", "policy", "filing") else 0
+    return _rank(row, now, interests) + primary_bonus + 1.5 * sum(word in haystack for word in decision_words)
 
 
 def _edition(now, tz_name):
@@ -330,7 +448,8 @@ def _quiz(items):
     return quiz
 
 
-def build_digest(now=None, previous=None, learner=None, fetcher=fetch_feed, tz_name="America/Los_Angeles", market_fetcher=None):
+def build_digest(now=None, previous=None, learner=None, fetcher=fetch_feed, tz_name="America/Los_Angeles",
+                 market_fetcher=None, sentiment_fetcher=None):
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
@@ -346,6 +465,38 @@ def build_digest(now=None, previous=None, learner=None, fetcher=fetch_feed, tz_n
     except Exception as exc:
         market_snapshot = []
         failures.append({"source": "FRED market snapshot", "error": str(exc)[:120]})
+
+    previous_sentiment = (previous or {}).get("sentiment") if isinstance((previous or {}).get("sentiment"), dict) else None
+    sentiment = None
+    if previous_sentiment and previous_sentiment.get("as_of"):
+        try:
+            sentiment_age = now - datetime.fromisoformat(previous_sentiment["as_of"]).astimezone(timezone.utc)
+            if sentiment_age < timedelta(hours=6):
+                sentiment = dict(previous_sentiment)
+                sentiment["cached"] = True
+        except (TypeError, ValueError):
+            pass
+    if sentiment is None:
+        if sentiment_fetcher is None:
+            sentiment_fetcher = fetch_reddit_sentiment if fetcher is fetch_feed else (lambda: {})
+        try:
+            sentiment = sentiment_fetcher()
+        except Exception as exc:
+            failures.append({"source": "Reddit sentiment", "error": str(exc)[:120]})
+            if previous_sentiment:
+                sentiment = dict(previous_sentiment)
+                sentiment["cached"] = True
+                sentiment["status"] = "stale"
+            else:
+                sentiment = {
+                    "status": "unavailable", "label": "Community pulse unavailable", "score": 0,
+                    "as_of": now.isoformat(), "post_count": 0, "confidence": "low", "themes": [],
+                    "communities": [{"name": name, "posts": 0, "url": f"https://www.reddit.com/{name}/"}
+                                    for name in REDDIT_COMMUNITIES.values()],
+                    "method": "Reddit RSS could not be refreshed without exceeding its public rate limit.",
+                    "caveat": "Open the linked communities directly; do not infer sentiment from missing data.",
+                    "cached": False,
+                }
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         jobs = {pool.submit(fetcher, source): source for source in SOURCES}
@@ -375,6 +526,7 @@ def build_digest(now=None, previous=None, learner=None, fetcher=fetch_feed, tz_n
     selected_ids = {row["url"] for row in selected}
     selected.extend(row for row in ranked if row["url"] not in selected_ids)
     selected = selected[:12]
+    selected.sort(key=lambda row: _decision_rank(row, now, interests), reverse=True)
     if not selected:
         raise RuntimeError("No recent items were available from the configured public feeds")
 
@@ -388,6 +540,7 @@ def build_digest(now=None, previous=None, learner=None, fetcher=fetch_feed, tz_n
             "concept": f"{term}: {definition}", "concept_term": term, "theme": row["theme"],
             "published_at": row["published"].isoformat(), "source_name": row["source"],
             "source_kind": row.get("source_kind", "news"),
+            "watch_next": _watch_next(row.get("source_kind", "news")),
             "is_new": row["url"] not in previous_urls,
             "sources": [{"title": row["source"], "url": row["url"]}],
         })
@@ -474,12 +627,12 @@ def build_digest(now=None, previous=None, learner=None, fetcher=fetch_feed, tz_n
             {"id": "lens-exposure", "topic": "Real estate & mortgages", "knowledge_point": "Translate news into your existing exposures—not a trade recommendation.", "questions_to_ask": ["Does this affect a rate, renewal, payment or deadline I already have?", "What would change my cash-flow assumptions?", "Which decision can safely wait for better evidence?"]},
             {"id": "lens-economics", "topic": "Tech, AI & industry", "knowledge_point": "Test adoption claims against durable economics.", "questions_to_ask": ["Who pays, and how repeatable is the demand?", "What are the variable and capital costs?", "What evidence would disprove the strongest claim?"]},
         ],
-        "quiz": _quiz(items), "manager_desk": manager_desk,
+        "quiz": _quiz(items), "manager_desk": manager_desk, "sentiment": sentiment,
         "changes": [{"title": item["title"], "topic": item["topic"], "source": item["source_name"]} for item in new_items[:6]],
         "checklist": [
-            "Open the original source for any story that could affect a payment, renewal, tax, job or housing decision.",
-            "Write down what changed, what did not change, and the next data point that could overturn your view.",
-            "For market moves, check the size and timeframe before treating the headline as a durable signal.",
+            "Open the primary source for the one takeaway most relevant to your existing exposure.",
+            "Write one sentence: what changed, what did not, and what would overturn your view.",
+            "Name the next catalyst or data release—and when it is expected.",
             "Do not make a buy, sell or timing decision from one briefing; use it to prepare better questions.",
         ],
         "daily_meta": {
